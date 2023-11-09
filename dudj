@@ -1,0 +1,44 @@
+def generate_insert_statements(csv_file, yaml_config):
+    config = load_yaml(yaml_config)
+    test_config = config['TEST']['LOAD DATA']
+    insert_statements = []
+
+    with open(csv_file, newline='') as csvfile:
+        data_reader = csv.DictReader(csvfile, delimiter=test_config['SEPARATOR'])
+        csv_headers = data_reader.fieldnames
+        print(f"CSV Headers: {csv_headers}")  # Debug print to check CSV headers
+
+        yaml_columns = {}
+        for col in test_config['COLUMNS']:
+            if isinstance(col, dict):  # If the item is a dictionary, normalize the 'colname' to uppercase
+                yaml_columns[col['colname'].upper()] = col
+            else:  # If the item is a string, normalize it to uppercase
+                yaml_columns[col.upper()] = {"colname": col.upper()}
+
+        print(f"YAML Columns: {yaml_columns.keys()}")  # Debug print to check YAML column names
+
+        for row_number, row in enumerate(data_reader, start=1):
+            values_to_insert = []
+            try:
+                for col_name in csv_headers:  # Use the uppercase header for consistency
+                    col_config = yaml_columns.get(col_name.upper(), {})
+                    value = row[col_name]
+                    regexp = col_config.get('regexp', '')  # Safely get the regexp
+                    if regexp and not regexp_check(value, regexp):
+                        raise ValueError(f"Row {row_number}: Data '{value}' does not match the regexp for column {col_name}")
+                    if col_config.get('datatype') == 'date':
+                        value = f"TO_DATE('{value}', '{col_config['picture']}')"
+                    else:
+                        value = f"'{value}'"
+                    values_to_insert.append(value)
+
+                # Correctly map the CSV headers to the column names expected in the SQL table
+                sql_column_names = ', '.join([yaml_columns[header.upper()]['colname'] for header in csv_headers])
+                insert_statement = f"INSERT INTO {test_config['TARGET']['TABLE']} ({sql_column_names}) VALUES ({', '.join(values_to_insert)});"
+                insert_statements.append(insert_statement)
+
+            except ValueError as ve:
+                print(str(ve))
+                break  # stop the process if a regexp check fails
+            
+    return insert_statements
