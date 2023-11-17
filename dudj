@@ -1,3 +1,157 @@
+
+import yaml
+import re
+import csv
+import csv
+import yaml
+from cryptography.fernet import Fernet
+import argparse
+import cx_Oracle
+
+
+
+# parser = argparse.ArgumentParser()
+
+# parser.add_argument("-d", required=True, dest="database", help="select your Database")
+# parser.add_argument("-t", required=False, action="store_true", dest="testFlag",help="run in test mode. Will not commit")
+
+# args = parser.parse_args()
+
+try:
+    with open(r'configFile\\yamlConfig.yaml','rb') as enc:
+        file = enc.read()
+        print('Succes in taking data from config file #1')
+except FileNotFoundError as fileError:
+    raise fileError
+except Exception as exception:
+    raise exception
+    
+try:
+    key = open((r'configFile\\config.key'), "rb").read()
+    fernet = Fernet(key)
+    print('Succes in taking data from config file #2')
+except FileNotFoundError as fileError:
+    raise fileError
+except Exception as exception: 
+    raise exception
+
+DatabaseDict = yaml.safe_load(fernet.decrypt(file))
+
+try:
+    specifyDatabase = DatabaseDict['APEX-PROD']
+    print("Succesfully specified the database" + str(DatabaseDict['APEX-PROD']))
+except KeyError as keyError:
+    # print(f'This database "{args.database}" does not exist.')
+    raise keyError
+except Exception as exception:
+    raise exception
+
+
+
+HOST = f"{specifyDatabase['HOST']}"
+PORT = f"{specifyDatabase['PORT']}"
+DATABASE = f"{specifyDatabase['DATABASE']}"
+PASSWORD = f"{specifyDatabase['PASSWORD']}"
+USER = f"{specifyDatabase['USER']}"
+
+database = cx_Oracle.makedsn(HOST, PORT, DATABASE)
+
+
+def regexp_check(data, regexp):
+    if regexp:
+        return re.match(regexp, data) is not None
+    return True
+
+# def load_yaml(yaml_file):
+yaml_config = 'apexloader.yaml'
+with open(yaml_config, 'r') as f:
+    yamlDict = yaml.safe_load(f)
+
+config = yamlDict['ORACLE']['TEST']
+test_config = config['LOAD DATA']
+insert_statements = []
+
+
+
+
+def generate_insert_statements(csv_file, yaml_config):
+
+            
+    
+    
+    with open(csv_file, newline='') as csvfile:
+        data_reader = csv.DictReader(csvfile, delimiter=test_config['SEPARATOR'])
+        csv_headers = data_reader.fieldnames
+        # print(f"CSV Headers: {csv_headers}")
+
+
+        yaml_columns = {}
+        for col in test_config['COLUMNS']:
+            if isinstance(col, dict):
+                inner_dict = col.get(next(iter(col)))
+                if 'COLNAME' in inner_dict:
+                    colname = inner_dict['COLNAME']
+                    yaml_columns[colname] = inner_dict
+                else:
+                    raise ValueError(f"Missing 'COLNAME' in column config: {inner_dict}")
+            elif isinstance(col, str):
+                yaml_columns[col] = {'COLNAME': col}
+            else:
+                raise ValueError(f"Invalid column format: {col}")
+
+        # print(f"YAML Columns: {list(yaml_columns.keys())}")
+        
+        for row_number, row in enumerate(data_reader, start=1):
+            values_to_insert = []
+            try:
+                for col_name in csv_headers:
+                    col_config = yaml_columns.get(col_name, {})
+                    value = row[col_name]
+                    regexp = col_config.get('REGEXP', '')
+                    if regexp and not regexp_check(value, regexp):
+                        raise ValueError(f"Row {row_number}: Data '{value}' does not match the regexp for column {col_name}, expected datatype: {col_config.get('DATATYPE')}")
+                    if col_config.get('DATATYPE') == 'date':
+                        value = f"TO_DATE('{value}', '{col_config['PICTURE']}')"
+                    else:
+                        value = f"'{value}'"
+                    values_to_insert.append(value)
+
+                sql_column_names = ', '.join([yaml_columns[header]['COLNAME'] for header in csv_headers])
+                insert_statement = f"INSERT INTO {config['TARGET']['TABLE']} ({sql_column_names}) VALUES ({', '.join(values_to_insert)});"
+                insert_statements.append(insert_statement)
+
+            except ValueError as ve:
+                print(str(ve))
+                break  # stop the process if a regexp check fails
+            
+    return insert_statements
+
+testFlag = '-t'
+yaml_config = 'apexloader.yaml' 
+csv_file = 'Test.csv' 
+try:
+    with cx_Oracle.connect(user=USER, password= PASSWORD, dsn=database) as con:
+        cur = con.cursor()
+        
+        lineCount = 0
+        val = []
+        
+        print("Connected successfully to the Apex Database")
+    statements = generate_insert_statements(csv_file, yaml_config)    
+    for s in statements:
+        print(s)
+    if testFlag == '-t': 
+        print("TEST MODE - NO DATA WRITTEN")
+#con.rollback()
+except Exception as e:
+    print(str(e))
+    print('dfhsdjkfbs')
+
+
+
+
+
+
 https://mlai.lucid.app/plugin/edit/aiplugin_7bd32ac1-c796-42c3-9c9d-7a9c3bb91ee6
 
 https://mlai.lucid.app/plugin/edit/aiplugin_eb44b07b-72e5-4633-ba54-50462b522351
